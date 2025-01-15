@@ -1,53 +1,23 @@
 import scrapy
 import re
 from logger import logger
+from datetime import datetime
 
 
 class IsnaSpider(scrapy.Spider):
     
     name = "Isna"
     start_urls = []
-    custom_settings = {'AUTOTHROTTLE_ENABLED':True,
-                        #'HTTPCACHE_ENABLED':True,  
-                        # enabling http_cache quickly finished the storage!
-                        #'CONCURRENT_REQUESTS':1000,
-                        #'CONCURRENT_REQUESTS_PER_DOMAIN':1000,
-                      }
-
+    custom_settings = {'AUTOTHROTTLE_ENABLED':True}
 
     main_url = "https://www.isna.ir"
     
-    def __init__(self ,from_year = 1378, to_year = 1401):
-        # Set the range of values for the mn, dy, and yr parameters
-        mn_range = range(1,32) 
-        dy_range = range(1,13)
-        yr_range = range(int(from_year),int(to_year)+1)
-        pi_range= range(1,101)
-        # Create an empty list to store the start URLs
-        self.start_urls = []
+    def __init__(self, url=None, *args, **kwargs):
+        super(IsnaSpider, self).__init__(*args, **kwargs)
+        self.items = []  # Initialize an empty list to store items
+        if url:
+            self.start_urls.append(url)
 
-        # Loop through the possible values for each parameter
-        for mn in mn_range:
-            for dy in dy_range:
-                for yr in yr_range:
-                    for pi in pi_range:
-                        # Construct the URL using string formatting
-                        url = f"https://www.isna.ir/archive?pi={pi}&ms=0&dy={dy}&mn={mn}&yr={yr}"
-                        # Add the URL to the start_urls list
-                        self.start_urls.append(url)
-
-        # Print the start URLs
-        logger.info('urls are appended')
-
-    def handle_failure(self, failure):
-        logger.warning("Error,", failure.request.url)
-        yield scrapy.Request(
-            url=failure.request.url,
-            dont_filter=True,
-            callback=self.parse,
-            errback=self.handle_failure)
-
-        
     def parse(self, response ):
         try:
             # we have a problem in isna which is unsolved. If you go to page 50, for example, it might show you some news from previous days! 
@@ -58,18 +28,16 @@ class IsnaSpider(scrapy.Spider):
                         self.main_url+news,
                         callback=self.parse_news,
                     )
-                    logger.info('added '+ self.main_url+news)
         except Exception:
             logger.error("Parsing Error: ", exc_info=True)
 
     def parse_news(self, response):
         try: 
-            # I used pip install scrapy and scrapy shell to help me generate this content. 
-            # scrapy shell
-            # fetch(url)
-            # then use reponse.css
-            # also Copy CSS Selector was useful
+            # Extract the date from the response (assuming it's available in the response)
+            date = response.css('article#item li.date::text').get()  # Adjust the selector as needed
+
             item = {
+                'date': date,
                 'title': response.css('article#item h1::text').get(),
                 'shortlink': response.css('input#short-url::attr(value)').get(),
                 'time':  response.css('article#item li:nth-child(1) > span.text-meta::text').get(),
@@ -80,12 +48,23 @@ class IsnaSpider(scrapy.Spider):
                 'body': ' '.join(response.css('article#item div.item-body *::text').getall()),
             }
             
-            # if I use strip on all of them I may get error. I have to check if it is not none. 
+            # Clean up the item fields
             for key in item:
                 if item[key]:
                     item[key] = re.sub(' +', ' ', item[key]).strip()
             
-            yield item
+            self.items.append(item)
+            # Log the item to confirm it's being created
+            logger.info(f"Collected item: {item}")
+            yield item  # Yield the item for Scrapy to process
 
         except Exception:
             logger.error("Error", exc_info=True)
+
+    def close(self, reason):
+        logger.info("Spider closed. Printing collected items:")
+        logger.info(f"Total items collected: {len(self.items)}")
+        logger.info(self.items)
+        # Print the collected items directly
+        for item in self.items:
+            print(f"Date: {item['date']}, Title: {item['title']}, Short Link: {item['shortlink']}, Time: {item['time']}")
